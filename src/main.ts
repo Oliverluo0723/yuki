@@ -1,5 +1,7 @@
 import p5 from 'p5';
+import { OrientationSource } from './input/orientation';
 import { PointerSource, pointerPose } from './input/pointer';
+import { choosePose } from './input/pose';
 import { attachWarm, WarmTracker } from './input/warm';
 import { drawField } from './render/fieldView';
 import { drawGlass } from './render/glassView';
@@ -10,9 +12,14 @@ import { clampDt, easeConditions, initialEased } from './snow/ease';
 import { createField, type Flake, stepField } from './snow/field';
 import { Landings } from './snow/landing';
 import { viewWeights } from './snow/views';
-import type { SnowConditions } from './types';
+import type { Mode, SnowConditions } from './types';
 import { mountDevPanel, overrides, stats, tunables } from './ui/devPanel';
+import { noticeFor, showEntry, showNotice } from './ui/entry';
+import { mountLabel } from './ui/label';
+import { labelText } from './ui/labelText';
 import { driftConditions } from './weather/drift';
+import { browserFetchJson, LiveWeather, liveConditions } from './weather/live';
+import { PLACES } from './weather/places';
 
 const stage = document.getElementById('stage');
 if (!stage) throw new Error('#stage not found');
@@ -26,8 +33,27 @@ if (dev) {
 
 const root = document.documentElement;
 const pointer = new PointerSource(root);
+const orientation = new OrientationSource();
 const warm = new WarmTracker();
 attachWarm(root, warm);
+
+// 兩個模式：常雪（預設）與北海道現在的天氣。點右下角的標籤切換。
+let mode: Mode = 'free';
+const live = new LiveWeather(browserFetchJson, PLACES, Date.now);
+const label = mountLabel(() => {
+  mode = mode === 'free' ? 'live' : 'free';
+  // 切回常雪時不丟資料：一小時內再切回來不用等。
+  // 沒有可用的資料、或已滿 15 分鐘才重新抓，連續切換不會送出一串請求。
+  if (mode === 'live' && (live.due() || live.view().kind === 'unavailable')) live.refresh();
+});
+
+// 入口：點一下之後才能讀手機的姿態
+const desktop = window.matchMedia('(pointer: fine)').matches;
+showEntry({ desktop, url: location.origin + location.pathname }).then((result) => {
+  if (result === 'granted') orientation.start();
+  const notice = noticeFor(result, desktop);
+  if (notice) showNotice(notice);
+});
 
 new p5((p: p5) => {
   let sprites: Sprites;
@@ -37,7 +63,10 @@ new p5((p: p5) => {
   // 每次打開從不同的時間點開始，常雪模式的天氣才不會每次都一樣
   let t = Math.random() * 10_000;
   const target = (): SnowConditions => ({
-    ...driftConditions(t, new Date().getHours()),
+    // 實際模式只讀天氣資料；沒有資料就沒有雪，絕不用模擬的補上
+    ...(mode === 'live'
+      ? liveConditions(live.view(), Date.now())
+      : driftConditions(t, new Date().getHours())),
     ...overrides.conditions,
   });
   let eased = initialEased(target());
@@ -64,7 +93,11 @@ new p5((p: p5) => {
 
     // 輸入 → 姿態
     warm.step(dt);
-    const sensed = pointer.current();
+    orientation.step(dt);
+    const sensed = choosePose(
+      orientation.current(tunables.uprightDeg, tunables.flatDeg),
+      pointer.current(),
+    );
     const posture = overrides.posture ?? sensed.posture;
     const down =
       overrides.lean === null
@@ -72,6 +105,8 @@ new p5((p: p5) => {
         : pointerPose({ posture: 0, lean: overrides.lean }).down;
 
     // 模式 → 條件
+    if (mode === 'live' && document.visibilityState === 'visible' && live.due()) live.refresh();
+    label.set(labelText(mode, live.view()));
     eased = easeConditions(eased, target(), dt);
     const w = viewWeights(posture);
 
