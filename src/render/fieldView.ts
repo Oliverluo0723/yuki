@@ -7,7 +7,8 @@ import type { Sprites } from './sprites';
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 const SOFT_Z = 0.7; // 比這更近的雪開始失焦，改貼柔邊圓
-const BANDS = 8; // 清楚的雪依深度分成幾組；同一組共用顏色
+const BANDS = 8; // 清楚的雪依深度分成幾組；同一組共用顏色和粗細
+const SETTLED = 0.97; // life 超過這個值就當作完全淡入
 
 interface Groups {
   bands: Flake[][];
@@ -51,24 +52,39 @@ export function drawField(
   const stretch = 1 + trail * 12;
   const g = groupsOf(flakes);
 
-  // 遠到中距離：清楚的短線
+  // 遠到中距離：清楚的短線。
+  // p5 2.x 的 line() / point() 每呼叫一次就建立一個形狀物件，一格上千次太浪費；
+  // 所以同一個深度帶裡已經完全淡入的雪片合成一個形狀一次畫完，
+  // 只有正在淡入淡出的少數幾片個別畫（它們的透明度各不相同）。
   p.noFill();
   p.strokeCap(p.ROUND);
+  const dots = trail <= 0;
   for (let b = 0; b < BANDS; b++) {
     const zMid = ((b + 0.5) / BANDS) * SOFT_Z;
     const [r, gr, bl] = flakeColor(c.dayness, zMid);
     p.stroke(r, gr, bl);
+    p.strokeWeight(flakeRadius(zMid, c.wetness) * 2 * grow);
     const base = lerp(0.35, 0.95, zMid) * weight;
+
+    ctx.globalAlpha = base;
+    p.beginShape(dots ? p.POINTS : p.LINES);
     for (const f of g.bands[b]) {
-      if (f.life < 0.01) continue;
-      ctx.globalAlpha = base * f.life;
-      p.strokeWeight(flakeRadius(f.z, c.wetness) * 2 * grow);
+      if (f.life < SETTLED) continue;
       const x = f.x * W;
       const y = f.y * H;
-      const dx = (f.x - f.px) * W * stretch;
-      const dy = (f.y - f.py) * H * stretch;
-      if (trail <= 0 || (dx === 0 && dy === 0)) p.point(x, y);
-      else p.line(x, y, x - dx, y - dy);
+      p.vertex(x, y);
+      // 這一格沒有移動時補一個極短的線段，圓頭會把它畫成一個點
+      if (!dots) p.vertex(x - ((f.x - f.px) * W * stretch || 0.01), y - (f.y - f.py) * H * stretch);
+    }
+    p.endShape();
+
+    for (const f of g.bands[b]) {
+      if (f.life < 0.01 || f.life >= SETTLED) continue;
+      ctx.globalAlpha = base * f.life;
+      const x = f.x * W;
+      const y = f.y * H;
+      if (dots) p.point(x, y);
+      else p.line(x, y, x - ((f.x - f.px) * W * stretch || 0.01), y - (f.y - f.py) * H * stretch);
     }
   }
 

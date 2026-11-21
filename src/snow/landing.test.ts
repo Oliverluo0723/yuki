@@ -5,6 +5,7 @@ import { type LandedPhase, type LandingEvent, Landings, MAX_LANDED } from './lan
 const B = { w: 400, h: 800 };
 const snow = { amount: 1, wetness: 0.5 };
 const none = { amount: 0, wetness: 0.5 };
+const barely = { amount: 0.001, wetness: 0.5 }; // 還在下，但這幾秒內不會有新的一片
 const rngFrom = (seed: number) => {
   let s = seed;
   return () => {
@@ -107,7 +108,7 @@ test('落在還暖的地方（手指已離開），停得短，但不會立刻�
     while (l.items.length === 0) l.step(1 / 60, snow, 1, [], B);
     const a = l.items[0];
     const warm = heat > 0 ? [{ x: a.x, y: a.y, heat }] : [];
-    while (l.items[0].phase === 'approach') l.step(1 / 60, none, 1, warm, B);
+    while (l.items[0].phase === 'approach') l.step(1 / 60, barely, 1, warm, B);
     expect(l.items[0].phase).toBe('rest');
     return l.items[0].dur;
   };
@@ -133,4 +134,18 @@ test('on 回傳的函式可以取消訂閱', () => {
   off();
   run(l, 10);
   expect(n).toBe(0);
+});
+
+test('雪停了（雪量是 0）：玻璃上剩下的雪幾秒內化完，不等原本的停留時間', () => {
+  const l = new Landings(rngFrom(1));
+  run(l, 12, { amount: 1, wetness: 0 }); // 又乾又冷：原本會停 6–10 秒
+  expect(l.items.length).toBeGreaterThan(10);
+  let melted = 0;
+  l.on((e) => {
+    if (e.type === 'melted') melted++;
+  });
+  const before = l.items.length;
+  run(l, 5.5, { amount: 0, wetness: 0 });
+  expect(l.items).toHaveLength(0);
+  expect(melted).toBe(before); // 是化掉，不是憑空消失
 });

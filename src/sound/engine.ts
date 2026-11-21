@@ -2,6 +2,11 @@ import { type SoundParams, tickCount } from './params';
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 const SMOOTH = 0.15; // 參數變化的時間常數（秒），避免爆音
+/**
+ * 整體放大幾倍。params.ts 裡的音量是彼此的比例；濾過的噪音本來就很小聲，
+ * 實測不放大時只有 −40 dBFS 左右，幾乎聽不到。
+ */
+const LOUDNESS = 4;
 
 /** 一段可以無縫循環的白噪音：開頭和接在結尾之後的那一段交叉淡化。 */
 function loopingNoise(ctx: AudioContext, seconds: number): AudioBuffer {
@@ -46,9 +51,18 @@ export class SnowSound {
     this.ctx = ctx;
 
     const master = ctx.createGain();
-    master.gain.setValueAtTime(0, ctx.currentTime);
-    master.gain.linearRampToValueAtTime(0.9, ctx.currentTime + 2); // 兩秒淡入
-    master.connect(ctx.destination);
+    master.gain.value = LOUDNESS;
+    const fade = ctx.createGain();
+    fade.gain.setValueAtTime(0, ctx.currentTime);
+    fade.gain.linearRampToValueAtTime(1, ctx.currentTime + 2); // 兩秒淡入
+    // 保險：好幾聲疊在一起時壓住，不讓它破音
+    const limiter = ctx.createDynamicsCompressor();
+    limiter.threshold.value = -6;
+    limiter.knee.value = 6;
+    limiter.ratio.value = 12;
+    limiter.attack.value = 0.003;
+    limiter.release.value = 0.25;
+    master.connect(fade).connect(limiter).connect(ctx.destination);
     this.master = master;
 
     const noise = ctx.createBufferSource();
@@ -84,11 +98,15 @@ export class SnowSound {
     });
   }
 
-  /** 每一格呼叫：把聲音追到現在的條件，並撒下這一格該有的細碎聲。swell 是陣風的倍率。 */
-  update(p: SoundParams, swell: number, dt: number): void {
+  /**
+   * 每一格呼叫：把聲音追到現在的條件，並撒下這一格該有的細碎聲。
+   * swell 是陣風的倍率；volume 是整體音量（1 = 預設）。
+   */
+  update(p: SoundParams, swell: number, dt: number, volume = 1): void {
     const ctx = this.ctx;
     if (ctx?.state !== 'running' || !this.air || !this.wind || !this.whistle) return;
     const now = ctx.currentTime;
+    this.master?.gain.setTargetAtTime(LOUDNESS * Math.max(0, volume), now, SMOOTH);
     this.air.gain.gain.setTargetAtTime(p.airGain, now, SMOOTH);
     this.air.filter.frequency.setTargetAtTime(p.airCutoff, now, SMOOTH);
     this.wind.gain.gain.setTargetAtTime(p.windGain * swell, now, SMOOTH);

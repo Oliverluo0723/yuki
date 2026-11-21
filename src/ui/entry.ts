@@ -11,10 +11,23 @@ export function noticeFor(result: OrientationPermission, desktop: boolean): stri
 }
 
 /**
+ * 允許了卻一直沒有感測器資料：Android 沒有權限詢問，感測器被網站設定擋掉、
+ * 或裝置根本沒有感測器時就是這樣。手機上要說明，電腦用滑鼠所以不用。
+ */
+export function silentSensorNotice(hasReading: boolean, desktop: boolean): string | null {
+  return hasReading || desktop ? null : ASK;
+}
+
+/**
  * 入口。iPhone 規定讀手機姿態前必須由使用者點一下，所以一定有這一頁。
  * 點下去的同一個事件裡請求姿態權限與螢幕常亮，然後淡出。
  */
-export function showEntry(opts: { desktop: boolean; url: string }): Promise<OrientationPermission> {
+export function showEntry(opts: {
+  desktop: boolean;
+  url: string;
+  /** 在點擊的同一個事件裡呼叫：聲音要在這裡開始，瀏覽器才放行 */
+  onStart?: () => void;
+}): Promise<OrientationPermission> {
   const el = document.createElement('div');
   el.id = 'entry';
 
@@ -46,6 +59,7 @@ export function showEntry(opts: { desktop: boolean; url: string }): Promise<Orie
       // 必須在點擊的處理函式裡直接呼叫，前面不能有 await，否則 iPhone 會拒絕
       const asked = requestOrientation();
       keepAwake();
+      opts.onStart?.();
       el.classList.add('leaving');
       setTimeout(() => el.remove(), 800);
       asked.then(resolve);

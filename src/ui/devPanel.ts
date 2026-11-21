@@ -13,6 +13,8 @@ export interface Tunables {
   dayGlass: number;
   /** 雪片數量的上限 */
   budgetMax: number;
+  /** 聲音的整體音量，1 = 預設，0 = 靜音 */
+  volume: number;
 }
 
 /** 開發面板蓋掉的值；null／沒有的欄位表示交還給裝置和天氣。 */
@@ -28,12 +30,13 @@ export const tunables: Tunables = {
   flatDeg: 15,
   dayGlass: 0.14,
   budgetMax: 1800,
+  volume: 1,
 };
 
 export const overrides: Overrides = { posture: null, lean: null, conditions: {} };
 
 /** 面板上顯示用，main 每秒更新。 */
-export const stats = { fps: 0, flakes: 0 };
+export const stats = { fps: 0, workMs: 0, flakes: 0 };
 
 /** 只在網址有 ?dev 時呼叫。這個面板不給觀眾用。 */
 export function mountDevPanel(): void {
@@ -68,8 +71,10 @@ export function mountDevPanel(): void {
   look.add(tunables, 'flatDeg', 0, 45, 1);
   look.add(tunables, 'dayGlass', 0.03, 0.3, 0.01);
   look.add(tunables, 'budgetMax', 150, 1800, 50);
+  look.add(tunables, 'volume', 0, 3, 0.05);
 
   const info = gui.addFolder('狀態');
   info.add(stats, 'fps').listen().disable();
+  info.add(stats, 'workMs').listen().disable();
   info.add(stats, 'flakes').listen().disable();
 }

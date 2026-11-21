@@ -13,6 +13,7 @@ export type LiveView =
 
 const REFRESH_MS = 900_000; // 資料每 15 分鐘更新一次
 const STALE_MS = 3_600_000; // 抓不到時，一小時內的舊資料繼續用
+const RETRY_MS = 60_000; // 抓失敗後多久重試；連續失敗每次加倍，最長 15 分鐘
 
 /**
  * 實際模式的天氣：抓取、過期、亂序回應的處理。
@@ -22,6 +23,7 @@ export class LiveWeather {
   private seq = 0;
   private inFlight: number | null = null;
   private lastStart: number | null = null;
+  private failures = 0; // 連續失敗幾次
   private data: { place: Place; now: WeatherNow; fetchedAt: number } | null = null;
 
   constructor(
@@ -43,14 +45,25 @@ export class LiveWeather {
     }
     if (seq !== this.seq) return; // 之後又抓了一次，或已經 stop
     this.inFlight = null;
-    if (!list) return; // 失敗：保留舊資料，讓 view() 依時間決定還能不能用
+    if (!list) {
+      // 失敗：保留舊資料，讓 view() 依時間決定還能不能用；並且早一點重試
+      this.failures++;
+      return;
+    }
+    this.failures = 0;
     const best = pickHeaviest(list);
     this.data = { place: best.place, now: best.now, fetchedAt: this.clock() };
   }
 
-  /** 距離上次開始抓取已滿 15 分鐘，或從沒抓過。 */
+  /**
+   * 該不該再抓一次：從沒抓過、距離上次開始抓取已滿 15 分鐘、
+   * 或上次失敗而且已經等夠久（60 秒起，連續失敗逐次加倍）。
+   */
   due(): boolean {
-    return this.lastStart === null || this.clock() - this.lastStart >= REFRESH_MS;
+    if (this.lastStart === null) return true;
+    const wait =
+      this.failures === 0 ? REFRESH_MS : Math.min(REFRESH_MS, RETRY_MS * 2 ** (this.failures - 1));
+    return this.clock() - this.lastStart >= wait;
   }
 
   view(): LiveView {

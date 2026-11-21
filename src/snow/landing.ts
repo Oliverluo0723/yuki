@@ -30,6 +30,7 @@ export const WARM_RADIUS = 60; // 手指附近多遠的雪會化，px
 export const MELT_SECONDS = 1;
 
 const RATE_AT_FULL = 4; // 雪量 1 時每秒落幾片
+const CLEAR_SECONDS = 2; // 雪停了之後，玻璃上剩下的雪最多再停這麼久
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
 /** 低頭時玻璃上的雪：靠近 → 落定 → 停留 → 化掉。 */
@@ -96,8 +97,11 @@ export class Landings {
         k.phase = 'rest';
         k.t = 0;
         k.dur = lerp(8, 3, c.wetness) * lerp(0.8, 1.2, this.rng()) * (1 - 0.9 * heat);
+        if (c.amount <= 0) k.dur = Math.min(k.dur, clearAfter(k));
         this.emit('landed', k);
       } else if (k.phase === 'rest') {
+        // 雪停了：剩下的雪幾秒內先後化完，不等原本的停留時間
+        if (c.amount <= 0) k.dur = Math.min(k.dur, k.t + clearAfter(k));
         // 手指或游標正在那裡才會立刻化；離開後的餘溫不會融掉已經停著的雪
         const touching = warm.some((p) => p.heat >= 1 && near(k, p));
         if (touching) this.emit('touched', k);
@@ -126,6 +130,11 @@ export class Landings {
     const e: LandingEvent = { type, id: k.id, x: k.x, y: k.y };
     for (const fn of this.listeners) fn(e);
   }
+}
+
+/** 每一片錯開一點，才不會同時消失。 */
+function clearAfter(k: Landed): number {
+  return CLEAR_SECONDS * (0.4 + 0.6 * k.seed);
 }
 
 function near(k: Landed, p: WarmPoint): boolean {

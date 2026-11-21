@@ -45,13 +45,13 @@ function parseOne(entry: unknown): WeatherNow | null {
   const snowfall = num(c.snowfall);
   const code = num(c.weather_code);
   if (snowfall === null && code === null) return null; // 沒有任何能判斷下不下雪的欄位
-  const windSpeed = num(c.wind_speed_10m) ?? 0;
+  const windSpeed = Math.max(0, num(c.wind_speed_10m) ?? 0);
   const isDayField = num(c.is_day);
   const hour = Number(c.time.slice(11, 13));
   return {
     time: c.time,
     temperature: num(c.temperature_2m),
-    snowfall: snowfall ?? 0,
+    snowfall: Math.max(0, snowfall ?? 0), // 負值會讓雪量算出 NaN
     weatherCode: code ?? -1,
     windSpeed,
     windDirection: num(c.wind_direction_10m) ?? 0,

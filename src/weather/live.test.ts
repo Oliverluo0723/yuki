@@ -117,3 +117,39 @@ test('liveConditions：有資料就照資料', async () => {
   expect(c.amount).toBeGreaterThan(0.5);
   expect(c.wetness).toBe(0); // −6 °C
 });
+
+test('抓失敗後一分鐘就重試，連續失敗逐次拉長，成功後回到 15 分鐘', async () => {
+  const { live, pending, tick } = setup();
+  let p = live.refresh();
+  pending[0].reject(new Error('offline'));
+  await p;
+  tick(59_000);
+  expect(live.due()).toBe(false);
+  tick(1_000);
+  expect(live.due()).toBe(true); // 60 秒
+  p = live.refresh();
+  pending[1].reject(new Error('offline'));
+  await p;
+  tick(119_000);
+  expect(live.due()).toBe(false);
+  tick(1_000);
+  expect(live.due()).toBe(true); // 第二次失敗：120 秒
+  p = live.refresh();
+  pending[2].resolve(snowy);
+  await p;
+  tick(120_000);
+  expect(live.due()).toBe(false); // 成功了：回到 15 分鐘
+  tick(780_000);
+  expect(live.due()).toBe(true);
+});
+
+test('重試的間隔最長 15 分鐘', async () => {
+  const { live, pending, tick } = setup();
+  for (let i = 0; i < 8; i++) {
+    const p = live.refresh();
+    pending[i].reject(new Error('offline'));
+    await p;
+    tick(900_000);
+    expect(live.due()).toBe(true);
+  }
+});

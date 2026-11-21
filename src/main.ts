@@ -12,9 +12,11 @@ import { clampDt, easeConditions, initialEased } from './snow/ease';
 import { createField, type Flake, stepField } from './snow/field';
 import { Landings } from './snow/landing';
 import { viewWeights } from './snow/views';
+import { SnowSound } from './sound/engine';
+import { panFor, soundParams, windSwell } from './sound/params';
 import type { Mode, SnowConditions } from './types';
 import { mountDevPanel, overrides, stats, tunables } from './ui/devPanel';
-import { noticeFor, showEntry, showNotice } from './ui/entry';
+import { noticeFor, showEntry, showNotice, silentSensorNotice } from './ui/entry';
 import { mountLabel } from './ui/label';
 import { labelText } from './ui/labelText';
 import { driftConditions } from './weather/drift';
@@ -24,11 +26,16 @@ import { PLACES } from './weather/places';
 const stage = document.getElementById('stage');
 if (!stage) throw new Error('#stage not found');
 
+// p5 預設每次呼叫都檢查參數，正式執行時不需要
+p5.disableFriendlyErrors = true;
+
+const sound = new SnowSound();
+
 const dev = new URLSearchParams(location.search).has('dev');
 if (dev) {
   mountDevPanel();
   // 開發時可以在主控台直接改：yuki.overrides.posture = 1
-  Object.assign(window, { yuki: { overrides, tunables, stats } });
+  Object.assign(window, { yuki: { overrides, tunables, stats, sound } });
 }
 
 const root = document.documentElement;
@@ -49,10 +56,21 @@ const label = mountLabel(() => {
 
 // 入口：點一下之後才能讀手機的姿態
 const desktop = window.matchMedia('(pointer: fine)').matches;
-showEntry({ desktop, url: location.origin + location.pathname }).then((result) => {
+showEntry({
+  desktop,
+  url: location.origin + location.pathname,
+  onStart: () => sound.start(), // 聲音必須在這一下點擊裡開始
+}).then((result) => {
   if (result === 'granted') orientation.start();
   const notice = noticeFor(result, desktop);
   if (notice) showNotice(notice);
+  // Android 不會詢問權限，感測器被擋掉時只會一直沒有資料：等一下還是沒有就說明
+  else if (result === 'granted') {
+    setTimeout(() => {
+      const silent = silentSensorNotice(orientation.current() !== null, desktop);
+      if (silent) showNotice(silent);
+    }, 2500);
+  }
 });
 
 new p5((p: p5) => {
@@ -70,10 +88,20 @@ new p5((p: p5) => {
     ...overrides.conditions,
   });
   let eased = initialEased(target());
+  let glass = 0; // 現在低頭的程度，給聲音用
+
+  // 玻璃上的雪發出的聲音：每一片落定各響一下，被手指融掉是一聲氣音
+  landings.on((e) => {
+    if (glass < 0.3) return; // 沒在低頭看，就聽不到這麼近的聲音
+    const pan = panFor(e.x, p.width);
+    if (e.type === 'landed') sound.landed(pan, eased.wetness);
+    else if (e.type === 'touched') sound.touched(pan);
+  });
 
   // 雪片數量：手機先少一點，之後每秒依幀率調整
   let budget = window.matchMedia('(pointer: coarse)').matches ? 900 : 1500;
   let frames = 0;
+  let workMs = 0; // 這一秒裡花在計算和畫圖的時間
   let fpsSince = performance.now();
 
   p.setup = () => {
@@ -88,6 +116,7 @@ new p5((p: p5) => {
   };
 
   p.draw = () => {
+    const began = performance.now();
     const dt = clampDt(p.deltaTime / 1000);
     t += dt;
 
@@ -107,8 +136,11 @@ new p5((p: p5) => {
     // 模式 → 條件
     if (mode === 'live' && document.visibilityState === 'visible' && live.due()) live.refresh();
     label.set(labelText(mode, live.view()));
-    eased = easeConditions(eased, target(), dt);
+    const goal = target();
+    eased = easeConditions(eased, goal, dt);
     const w = viewWeights(posture);
+    glass = w.glass;
+    sound.update(soundParams(eased, w), windSwell(t, eased.gust), dt, tunables.volume);
 
     // 雪
     const active = activeCount(eased.amount, budget);
@@ -122,7 +154,9 @@ new p5((p: p5) => {
       (x, y, z) => p.noise(x, y, z),
       p.width / p.height,
     );
-    landings.step(dt, eased, w.glass, warm.points(), { w: p.width, h: p.height });
+    // 雪停了就不再落新的；eased 還在退場的那幾秒也一樣
+    const landing = { amount: goal.amount === 0 ? 0 : eased.amount, wetness: eased.wetness };
+    landings.step(dt, landing, w.glass, warm.points(), { w: p.width, h: p.height });
 
     // 畫
     const bg = mix(
@@ -136,19 +170,23 @@ new p5((p: p5) => {
     if (w.field > 0) drawField(p, flakes, eased, w.field, tunables.trail, sprites);
     if (w.glass > 0) drawGlass(p, landings.items, w.glass, sprites);
 
-    // 每秒量一次幀率，調整雪片數量
+    // 每秒量一次幀率和每格的工作時間，調整雪片數量
     frames++;
     const now = performance.now();
+    workMs += now - began;
     const elapsed = now - fpsSince;
     if (elapsed >= 1000) {
       // 分頁剛從背景回來時這一秒不準，跳過
       if (elapsed < 2000) {
         const fps = (frames * 1000) / elapsed;
-        budget = adjustBudget(budget, fps, 150, tunables.budgetMax);
+        const work = workMs / frames;
+        budget = adjustBudget(budget, fps, work, 150, tunables.budgetMax);
         stats.fps = Math.round(fps);
+        stats.workMs = Math.round(work * 10) / 10;
         stats.flakes = active;
       }
       frames = 0;
+      workMs = 0;
       fpsSince = now;
     }
   };

@@ -71,3 +71,8 @@ test('形狀不對一律回 null', () => {
   expect(parseResponse([SAPPORO, {}], two)).toBeNull(); // 沒有 current
   expect(parseResponse(cur({ temperature_2m: 1 }), [PLACES[0]])).toBeNull(); // snowfall 和 weather_code 都沒有
 });
+
+test('負的降雪量當作 0（否則雪量會算出 NaN，而且永遠回不來）', () => {
+  const r = parseResponse(cur({ snowfall: -0.1, weather_code: 73 }), [PLACES[0]]);
+  expect(r?.[0].now.snowfall).toBe(0);
+});
