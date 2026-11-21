@@ -1,4 +1,5 @@
 import GUI from 'lil-gui';
+import type { SceneKind } from '../render/scene';
 import type { SnowConditions } from '../types';
 
 /** 要在裝置上用眼睛調的數值。 */
@@ -15,6 +16,8 @@ export interface Tunables {
   budgetMax: number;
   /** 聲音的整體音量，1 = 預設，0 = 靜音 */
   volume: number;
+  /** 平視的背景（試作）：0 原本的平塗、2 空氣加樹影、3 再加路燈 */
+  scene: SceneKind;
 }
 
 /** 開發面板蓋掉的值；null／沒有的欄位表示交還給裝置和天氣。 */
@@ -31,6 +34,7 @@ export const tunables: Tunables = {
   dayGlass: 0.14,
   budgetMax: 1800,
   volume: 1,
+  scene: 2,
 };
 
 export const overrides: Overrides = { posture: null, lean: null, conditions: {} };
@@ -72,6 +76,7 @@ export function mountDevPanel(): void {
   look.add(tunables, 'dayGlass', 0.03, 0.3, 0.01);
   look.add(tunables, 'budgetMax', 150, 1800, 50);
   look.add(tunables, 'volume', 0, 3, 0.05);
+  look.add(tunables, 'scene', { 原本: 0, 樹影: 2, 路燈: 3 }).listen();
 
   const info = gui.addFolder('狀態');
   info.add(stats, 'fps').listen().disable();

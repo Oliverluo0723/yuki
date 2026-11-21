@@ -3,9 +3,11 @@ import { OrientationSource } from './input/orientation';
 import { PointerSource, pointerPose } from './input/pointer';
 import { choosePose } from './input/pose';
 import { attachWarm, WarmTracker } from './input/warm';
+import { Backdrop } from './render/backdrop';
 import { drawField } from './render/fieldView';
 import { drawGlass } from './render/glassView';
 import { fieldBackground, glassBackground, mix } from './render/palette';
+import { makeFrame, type SceneKind } from './render/scene';
 import { makeSprites, type Sprites } from './render/sprites';
 import { activeCount, adjustBudget } from './snow/budget';
 import { clampDt, easeConditions, initialEased } from './snow/ease';
@@ -37,6 +39,14 @@ if (dev) {
   // 開發時可以在主控台直接改：yuki.overrides.posture = 1
   Object.assign(window, { yuki: { overrides, tunables, stats, sound } });
 }
+
+// 試作：鍵盤 0／2／3 或網址 ?scene=3 切換平視的背景
+const asScene = (v: string | null): SceneKind | null =>
+  v === '0' ? 0 : v === '2' ? 2 : v === '3' ? 3 : null;
+tunables.scene = asScene(new URLSearchParams(location.search).get('scene')) ?? tunables.scene;
+window.addEventListener('keydown', (e) => {
+  tunables.scene = asScene(e.key) ?? tunables.scene;
+});
 
 const root = document.documentElement;
 const pointer = new PointerSource(root);
@@ -77,6 +87,7 @@ new p5((p: p5) => {
   let sprites: Sprites;
   let flakes: Flake[] = [];
   const landings = new Landings(Math.random);
+  const backdrop = new Backdrop();
 
   // 每次打開從不同的時間點開始，常雪模式的天氣才不會每次都一樣
   let t = Math.random() * 10_000;
@@ -167,7 +178,12 @@ new p5((p: p5) => {
     // trail 超過 0.5 時不整張清掉，留下殘影（只在平視）
     const smear = tunables.trail > 0.5 ? (tunables.trail - 0.5) * 1.96 * w.field : 0;
     p.background(bg[0], bg[1], bg[2], (1 - smear) * 255);
-    if (w.field > 0) drawField(p, flakes, eased, w.field, tunables.trail, sprites);
+    const frame = tunables.scene === 0 ? null : makeFrame(p.width, p.height, down, posture);
+    if (frame) backdrop.draw(p, tunables.scene, frame, eased.dayness, w.field * (1 - smear));
+    if (w.field > 0) {
+      drawField(p, flakes, eased, w.field, tunables.trail, sprites, frame);
+      if (frame) backdrop.drawLit(p, tunables.scene, flakes, frame, eased, w.field);
+    }
     if (w.glass > 0) drawGlass(p, landings.items, w.glass, sprites);
 
     // 每秒量一次幀率和每格的工作時間，調整雪片數量

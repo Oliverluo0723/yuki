@@ -2,6 +2,7 @@ import type p5 from 'p5';
 import { type Flake, flakeRadius, isNear } from '../snow/field';
 import type { EasedConditions } from '../types';
 import { flakeColor } from './palette';
+import { type Frame, isGrounded } from './scene';
 import type { Sprites } from './sprites';
 
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -43,6 +44,8 @@ export function drawField(
   weight: number,
   trail: number,
   sprites: Sprites,
+  /** 有地面時給：落到地面以下的雪片不畫 */
+  frame: Frame | null = null,
 ): void {
   const ctx = p.drawingContext as CanvasRenderingContext2D;
   const W = p.width;
@@ -51,6 +54,7 @@ export function drawField(
   const grow = 1 + (1 - weight) * 0.6;
   const stretch = 1 + trail * 12;
   const g = groupsOf(flakes);
+  const hidden = (f: Flake) => frame !== null && isGrounded(frame, f.x * W, f.y * H, f.z);
 
   // 遠到中距離：清楚的短線。
   // p5 2.x 的 line() / point() 每呼叫一次就建立一個形狀物件，一格上千次太浪費；
@@ -69,7 +73,7 @@ export function drawField(
     ctx.globalAlpha = base;
     p.beginShape(dots ? p.POINTS : p.LINES);
     for (const f of g.bands[b]) {
-      if (f.life < SETTLED) continue;
+      if (f.life < SETTLED || hidden(f)) continue;
       const x = f.x * W;
       const y = f.y * H;
       p.vertex(x, y);
@@ -79,7 +83,7 @@ export function drawField(
     p.endShape();
 
     for (const f of g.bands[b]) {
-      if (f.life < 0.01 || f.life >= SETTLED) continue;
+      if (f.life < 0.01 || f.life >= SETTLED || hidden(f)) continue;
       ctx.globalAlpha = base * f.life;
       const x = f.x * W;
       const y = f.y * H;
@@ -90,7 +94,7 @@ export function drawField(
 
   // 近的：失焦的柔邊圓，越近越糊
   for (const f of g.soft) {
-    if (f.life < 0.01) continue;
+    if (f.life < 0.01 || hidden(f)) continue;
     const blur = lerp(0.2, 0.8, (f.z - SOFT_Z) / (0.97 - SOFT_Z));
     const d = flakeRadius(f.z, c.wetness) * 2 * grow * (1 + blur);
     ctx.globalAlpha = lerp(0.35, 0.95, f.z) * weight * f.life * 0.8;
@@ -100,7 +104,7 @@ export function drawField(
   // 最近的幾片：很大、很淡的圓斑，偶爾從眼前掠過
   const blob = sprites.get(1);
   for (const f of g.near) {
-    if (f.life < 0.01) continue;
+    if (f.life < 0.01 || hidden(f)) continue;
     const d = flakeRadius(f.z, c.wetness) * 2 * grow;
     ctx.globalAlpha = weight * f.life * 0.25;
     p.image(blob, f.x * W - d / 2, f.y * H - d / 2, d, d);
